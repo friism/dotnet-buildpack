@@ -18,10 +18,10 @@ source $BUILDPACK_DIR/bin/util
 
 export_env_dir ${ENV_DIR}
 
-: ${LIBUV_VERSION:="1.10.1"}
-: ${NODEJS_VERSION:="6.9.1"}
-: ${DOTNET_SDK_VERSION:="1.0.0-preview2-1-003177"}
-: ${DOTNET_RUNTIME_VERSION:="1.1.0"}
+: ${LIBUV_VERSION:="1.11.0"}
+: ${NODEJS_VERSION:="6.10.0"}
+: ${DOTNET_SDK_VERSION:="1.0.1"}
+: ${DOTNET_RUNTIME_VERSION:="1.1.1"}
 : ${LIBUNWIND_VERSION:="1.1-4.1"}
 
 export NUGET_XMLDOC_MODE=skip
@@ -64,12 +64,12 @@ if [ ! -d ${DOTNET_CACHE_LOCATION} ]; then
 
 	echo "Downloading .NET SDK version ${DOTNET_SDK_VERSION} and runtime version ${DOTNET_RUNTIME_VERSION}"
 
-	DOTNET_SDK_DOWNLOAD_URL=https://dotnetcli.blob.core.windows.net/dotnet/preview/Binaries/$DOTNET_SDK_VERSION/dotnet-dev-ubuntu-x64.$DOTNET_SDK_VERSION.tar.gz
+	DOTNET_SDK_DOWNLOAD_URL=https://dotnetcli.blob.core.windows.net/dotnet/Sdk/$DOTNET_SDK_VERSION/dotnet-dev-ubuntu-x64.$DOTNET_SDK_VERSION.tar.gz
 	curl -sSL ${DOTNET_SDK_DOWNLOAD_URL} | tar xz -C ${DOTNET_CACHE_LOCATION}/sdk
-	find ${DOTNET_CACHE_LOCATION}/sdk/sdk/${DOTNET_SDK_VERSION}/runtimes/* -maxdepth 0 ! -name unix -exec rm -r {} +
+	find ${DOTNET_CACHE_LOCATION}/sdk/sdk/${DOTNET_SDK_VERSION}/runtimes/* -maxdepth 0 ! -name unix ! -name any -exec rm -r {} +
 	rm -f ${DOTNET_CACHE_LOCATION}/sdk/sdk/${DOTNET_SDK_VERSION}/nuGetPackagesArchive.lzma
 
-	DOTNET_RUNTIME_DOWNLOAD_URL=http://download.microsoft.com/download/A/F/6/AF610E6A-1D2D-47D8-80B8-F178951A0C72/Binaries/dotnet-ubuntu-x64.${DOTNET_RUNTIME_VERSION}.tar.gz
+	DOTNET_RUNTIME_DOWNLOAD_URL=https://dotnetcli.blob.core.windows.net/dotnet/release/1.1.0/Binaries/$DOTNET_RUNTIME_VERSION/dotnet-ubuntu-x64.$DOTNET_RUNTIME_VERSION.tar.gz
 	curl -sSL ${DOTNET_RUNTIME_DOWNLOAD_URL} | tar xz -C ${DOTNET_CACHE_LOCATION}/runtime
 fi
 export PATH="${DOTNET_CACHE_LOCATION}/sdk:$PATH"
@@ -96,23 +96,22 @@ npm config set cache ${NODEJS_CACHE_LOCATION}/npm/cache -g
 # Build the project
 DEPLOYMENT_FILE_LOCATION=${SRC_DIR}/.deployment
 if [ -n "$PROJECT" ]; then
-	PROJECT_JSON_FILE=${SRC_DIR}/${PROJECT}
+	PROJECT_FILE=${SRC_DIR}/${PROJECT}
 	echo "Project file configured in PROJECT environment variable"
 elif [ -e ${DEPLOYMENT_FILE_LOCATION} ]; then
-	PROJECT_JSON_FILE=${SRC_DIR}/$(awk -F "=" '/project/ {print $2}' ${DEPLOYMENT_FILE_LOCATION} | tr -d ' ')
+	PROJECT_FILE=${SRC_DIR}/$(awk -F "=" '/project/ {print $2}' ${DEPLOYMENT_FILE_LOCATION} | tr -d ' ')
 	echo "Project file configured in .deployment file"
 else
-	PROJECT_JSON_FILES=$(find ${SRC_DIR}/. -maxdepth 3 -iname "project.json")
-	printf 'Found %s project.json files\n' $(echo "$PROJECT_JSON_FILES" | wc -l | tr -d ' ')
-	PROJECT_JSON_FILE=$(echo "$PROJECT_JSON_FILES" | head -1)
+	PROJECT_FILES=$(find ${SRC_DIR}/. -maxdepth 3 -iname *.csproj)
+	printf 'Found %s csproj files\n' $(echo "$PROJECT_FILES" | wc -l | tr -d ' ')
+	PROJECT_FILE=$(echo "$PROJECT_FILES" | head -1)
 fi
-echo "Building ${PROJECT_JSON_FILE}"
+echo "Building ${PROJECT_FILE}"
 
 export NUGET_PACKAGES="${CACHE_DIR}/nuget/cache"
-dotnet restore ${PROJECT_JSON_FILE}
+dotnet restore --runtime ubuntu.14.04-x64 ${PROJECT_FILE}
 
-dotnet publish ${PROJECT_JSON_FILE} --output ${BUILD_DIR} --runtime ubuntu.14.04-x64 --configuration Release 
-
+dotnet publish ${PROJECT_FILE} --output ${BUILD_DIR} --runtime ubuntu.14.04-x64 --configuration Release /p:AssemblyName=app
 
 # Get libuv
 LIBUV_CACHE_LOCATION=${CACHE_DIR}/libuv/${LIBUV_VERSION}
@@ -129,7 +128,6 @@ cat <<EOF >$BUILD_DIR/.profile.d/000_libuv.sh
 export LD_LIBRARY_PATH="\$HOME/libuv/lib:\$LD_LIBRARY_PATH"
 EOF
 
-# TODO: read Procfile from `commands` in project.json
 if [ -e ${SRC_DIR}/Procfile ]; then
 	cp ${SRC_DIR}/Procfile ${BUILD_DIR}
 else
